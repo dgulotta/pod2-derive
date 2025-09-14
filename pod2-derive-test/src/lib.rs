@@ -11,6 +11,14 @@ mod test {
         d: HashSet<i64>,
     }
 
+    #[derive(TryFromValue)]
+    #[allow(dead_code)]
+    struct MyUnitStruct;
+
+    #[derive(TryFromValue)]
+    #[allow(dead_code)]
+    struct MyTupleStruct(i64, i64);
+
     use std::collections::{HashMap, HashSet};
 
     use pod2::middleware::{
@@ -19,7 +27,7 @@ mod test {
     };
 
     #[test]
-    fn test_tfv() {
+    fn test_tfv_struct() {
         let arr = Array::new(6, vec![Value::from(3), Value::from(4)]).unwrap();
         let set = Set::new(6, [5, 6].into_iter().map(Value::from).collect()).unwrap();
         let mut kvs = HashMap::new();
@@ -29,6 +37,28 @@ mod test {
         kvs.insert(Key::from("d"), Value::from(set));
         let d = Dictionary::new(Params::default().max_depth_mt_containers, kvs).unwrap();
         let v = Value::from(d);
-        let _s: MyStruct = v.try_into().unwrap();
+        let _: MyStruct = v.try_into().unwrap();
+    }
+
+    #[test]
+    fn test_tfv_unit_struct() {
+        let _: MyUnitStruct = Value::from(0).try_into().unwrap();
+    }
+
+    #[test]
+    fn test_tfv_tuple_struct() {
+        let arr = Array::new(6, vec![Value::from(0), Value::from(1)]).unwrap();
+        let v = Value::from(arr);
+        let _: MyTupleStruct = v.try_into().unwrap();
+    }
+
+    #[test]
+    fn test_tfv_tuple_struct_wrong_arity() {
+        let short_arr = Array::new(6, vec![Value::from(0)]).unwrap();
+        let short_v = Value::from(short_arr);
+        let long_arr = Array::new(6, vec![Value::from(0), Value::from(1), Value::from(2)]).unwrap();
+        let long_v = Value::from(long_arr);
+        assert!(<Value as TryInto<MyTupleStruct>>::try_into(short_v).is_err());
+        assert!(<Value as TryInto<MyTupleStruct>>::try_into(long_v).is_err());
     }
 }
