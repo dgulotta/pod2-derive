@@ -1,0 +1,16 @@
+[workspace]
+default-members = [""]
+members = ["", "pod2-derive-test"]
+resolver = "2"
+
+[package]
+name = "pod2-derive"
+version = "0.1.0"
+edition = "2024"
+
+[lib]
+proc-macro = true
+
+[dependencies]
+quote = "1.0.40"
+syn = "2.0.106"
