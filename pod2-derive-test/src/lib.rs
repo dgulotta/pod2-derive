@@ -4,7 +4,7 @@ mod test {
 
     #[derive(TryFromValue)]
     #[allow(dead_code)]
-    struct MyStruct {
+    struct Struct {
         a: i64,
         b: i64,
         c: Vec<i64>,
@@ -12,7 +12,13 @@ mod test {
     }
 
     #[derive(TryFromValue)]
-    struct MyUnitStruct;
+    struct UnitStruct;
+
+    #[derive(TryFromValue)]
+    struct TupleStructWithNoFields();
+
+    #[derive(TryFromValue)]
+    enum EmptyEnum {}
 
     #[derive(TryFromValue)]
     #[allow(dead_code)]
@@ -36,12 +42,18 @@ mod test {
         kvs.insert(Key::from("d"), Value::from(set));
         let d = Dictionary::new(Params::default().max_depth_mt_containers, kvs).unwrap();
         let v = Value::from(d);
-        let _: MyStruct = v.try_into().unwrap();
+        let _: Struct = v.try_into().unwrap();
+    }
+
+    #[test]
+    fn test_tfv_empty_enum() {
+        assert!(EmptyEnum::try_from(Value::from(0)).is_err());
     }
 
     #[test]
     fn test_tfv_unit_struct() {
-        let _: MyUnitStruct = Value::from(0).try_into().unwrap();
+        let _: UnitStruct = Value::from(0).try_into().unwrap();
+        let _: TupleStructWithNoFields = Value::from(0).try_into().unwrap();
     }
 
     #[test]
@@ -57,7 +69,7 @@ mod test {
         let short_v = Value::from(short_arr);
         let long_arr = Array::new(6, vec![Value::from(0), Value::from(1), Value::from(2)]).unwrap();
         let long_v = Value::from(long_arr);
-        assert!(<Value as TryInto<MyTupleStruct>>::try_into(short_v).is_err());
-        assert!(<Value as TryInto<MyTupleStruct>>::try_into(long_v).is_err());
+        assert!(MyTupleStruct::try_from(short_v).is_err());
+        assert!(MyTupleStruct::try_from(long_v).is_err());
     }
 }
