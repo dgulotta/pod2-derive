@@ -26,8 +26,24 @@ pub fn from_value_derive(input: TokenStream) -> TokenStream {
                 }
             }
             syn::Fields::Unnamed(fields) => match fields.unnamed.len() {
-                0 => todo!(),
-                1 => todo!(),
+                0 => quote! {
+                    #[automatically_derived]
+                    impl From<&pod2::middleware::TypedValue> for #name {
+                        type Error = pod2::middleware::Error;
+                        fn from(_: &pod2::middleware::TypedValue) -> Self {
+                            Self()
+                        }
+                    }
+                },
+                1 => quote! {
+                    #[automatically_derived]
+                    impl From<&pod2::middleware::TypedValue> for #name {
+                        type Error = pod2::middleware::Error;
+                        fn from(v: &pod2::middleware::TypedValue) -> Self {
+                            Self(v.into())
+                        }
+                    }
+                },
                 _ => {
                     return syn::Error::new(
                         ast.span(),
@@ -92,10 +108,11 @@ pub fn try_from_value_derive(input: TokenStream) -> TokenStream {
                 let dict_var = format_ident!("__dict");
                 let field_list = fields.named.iter().map(|field| {
                     let ident = &field.ident;
+                    let ident_string = ident.as_ref().unwrap().to_string();
                     let ty = &field.ty;
                     quote! {
                         #ident: <#ty>::try_from(
-                            #dict_var.get(&pod2::middleware::Key::from(stringify!(#ident)))?.typed())?
+                            #dict_var.get(&pod2::middleware::Key::from(#ident_string))?.typed())?
                     }
                 });
                 quote! {
@@ -127,6 +144,7 @@ pub fn try_from_value_derive(input: TokenStream) -> TokenStream {
                         }
                     },
                     1 => quote! {
+                        #[automatically_derived]
                         impl TryFrom<&pod2::middleware::TypedValue> for #name {
                             type Error = pod2::middleware::Error;
                             fn try_from(v: &pod2::middleware::TypedValue) -> Result<Self, Self::Error> {
@@ -136,10 +154,9 @@ pub fn try_from_value_derive(input: TokenStream) -> TokenStream {
                     },
                     _ => {
                         let arr_var = format_ident!("__arr");
-                        let field_list = fields.unnamed.iter().enumerate().map(|(n, field)| {
-                            let ty = &field.ty;
+                        let field_list = fields.unnamed.iter().enumerate().map(|(n, _)| {
                             quote! {
-                                <#ty>::try_from(#arr_var.array()[#n].typed())?
+                                #arr_var.array()[#n].typed().try_into()?
                             }
                         });
                         quote! {
@@ -182,17 +199,113 @@ pub fn try_from_value_derive(input: TokenStream) -> TokenStream {
             }
         },
         syn::Data::Enum(e) => {
-            let variant_list = e.variants.iter().map(|v| {
-                let name = &v.ident;
-                match v.fields {
-                    Fields::Unit => quote! {
-                        pod2::middleware::TypedValue::String(s) if s == #name => Ok(#name)
+            let mut direct_list = vec![];
+            let mut dict_list = vec![];
+            let value_var = format_ident!("__value");
+            let key_var = format_ident!("__key");
+            let outer_dict_var = format_ident!("__outer_dict");
+            let inner_dict_var = format_ident!("__inner_dict");
+            let inner_arr_var = format_ident!("__inner_arr");
+            for v in e.variants.iter() {
+                let variant_ident = &v.ident;
+                let variant_string = variant_ident.to_string();
+                match &v.fields {
+                    Fields::Unit => direct_list.push(quote! {
+                        pod2::middleware::TypedValue::String(s) if s == #variant_string => Ok(Self::#variant_ident)
+                    }),
+                    Fields::Named(fields) => {
+                        let struct_field_list = fields.named.iter().map(|field| {
+                            let field_ident = &field.ident;
+                            let field_string = field_ident.as_ref().unwrap().to_string();
+                            let ty = &field.ty;
+                            quote! {
+                                #field_ident: <#ty>::try_from(
+                                    #inner_dict_var.get(&pod2::middleware::Key::from(#field_string))?.typed())?
+                        
+                            }
+                        });
+                        dict_list.push(quote! {
+                            #variant_string => match #value_var.typed() {
+                                pod2::middleware::TypedValue::Dictionary(#inner_dict_var) => {
+                                    Ok(Self::#variant_ident {
+                                        #(#struct_field_list,)*
+                                    })
+                                },
+                                _ => Err(pod2::middleware::Error::custom(format!("Expected a Dictionary, got {v}")))
+                            }
+                        });
+                    }
+                    Fields::Unnamed(fields) => {
+                        match fields.unnamed.len() {
+                            0 => direct_list.push(quote! {
+                                pod2::middleware::TypedValue::String(s) if s == #variant_string => Ok(Self::#variant_ident())
+                            }),
+                            1 => dict_list.push(quote! {
+                                #variant_string => Ok(Self::#variant_ident(#value_var.try_into()?))
+                            }),
+                            _ => {
+                                let field_list = fields.unnamed.iter().enumerate().map(|(n, _)| {
+                                    quote! {
+                                        #inner_arr_var.array()[#n].typed().try_into()?
+                                    }
+                                });
+                                let num_fields = fields.unnamed.len();
+                                dict_list.push(quote! {
+                                    #variant_string => {
+                                        if let pod2::middleware::TypedValue::Array(#inner_arr_var) = #value_var.typed() {
+                                            if #inner_arr_var.array().len() == #num_fields {
+                                                Ok(Self::#variant_ident(
+                                                    #(#field_list,)*
+                                                ))
+                                            }
+                                            else {
+                                                Err(pod2::middleware::Error::custom(
+                                                    format!("Expected an Array of length {}, got length {}", #num_fields, #inner_arr_var.array().len())
+                                                ))
+                                            }
+                                        } else {
+                                            Err(pod2::middleware::Error::custom(
+                                                format!("Expected an Array, got {}", #variant_ident)
+                                            ))
+                                        }
+                                    }
+                                });
+                            }
+                        }
                     },
-                    _ => todo!(),
                 }
+            }
+            let err_msg = match (direct_list.is_empty(), dict_list.is_empty()) {
+                (false, false) => "Expected a String or Dictionary with one entry",
+                (true, false) => "Expected a Dictionary with one entry",
+                (false, true) => "Expected a String",
+                (true, true) => "Cannot instantiate an empty enum",
+            };
+            if !dict_list.is_empty() {
+                direct_list.push(quote! {
+                    pod2::middleware::TypedValue::Dictionary(#outer_dict_var) if #outer_dict_var.kvs().len() == 1 => {
+                        let (#key_var, #value_var) = #outer_dict_var.kvs().iter().next().unwrap();
+                        match #key_var {
+                            #(#dict_list,)*
+                        }
+                    }
+                });
+            }
+            direct_list.push(quote!{
+                _ => Err(pod2::middleware::Error::custom(#err_msg.to_string()))
             });
-            todo!()
-        }
+            quote! {
+                #[automatically_derived]
+                impl TryFrom<&pod2::middleware::TypedValue> for #name {
+                    type Error = pod2::middleware::Error;
+                    fn try_from(v: &pod2::middleware::TypedValue) -> Result<Self, Self::Error> {
+                        match v {
+                            #(#direct_list,)*
+                        }
+                    }
+                }
+            }
+        },
         syn::Data::Union(_) => return unions_not_supported(ast.span()),
     };
     let forward = quote! {
