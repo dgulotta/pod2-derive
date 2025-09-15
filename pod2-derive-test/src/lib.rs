@@ -1,9 +1,10 @@
 #[cfg(test)]
+#[allow(dead_code)]
 mod test {
+
     use pod2_derive::TryFromValue;
 
     #[derive(TryFromValue)]
-    #[allow(dead_code)]
     struct Struct {
         a: i64,
         b: i64,
@@ -30,6 +31,30 @@ mod test {
         Key, Params, Value,
         containers::{Array, Dictionary, Set},
     };
+
+    mod from_value {
+        use pod2::middleware::Value;
+        use pod2_derive::FromValue;
+
+        #[derive(FromValue)]
+        struct UnitStruct;
+
+        #[derive(FromValue)]
+        struct TupleStruct0();
+
+        #[derive(FromValue)]
+        struct EmptyStruct {}
+
+        #[derive(FromValue, PartialEq, Eq)]
+        struct NewtypeStruct(Value);
+
+        #[test]
+        fn test_from_value() {
+            let v = Value::from(2);
+            let n = NewtypeStruct::from(v.clone());
+            assert_eq!(v, n.0);
+        }
+    }
 
     #[test]
     fn test_tfv_struct() {

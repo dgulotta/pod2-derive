@@ -17,32 +17,15 @@ pub fn from_value_derive(input: TokenStream) -> TokenStream {
         syn::Data::Struct(s) => match &s.fields {
             syn::Fields::Unit => {
                 quote! {
-                    #[automatically_derived]
-                    impl From<&pod2::middleware::TypedValue> for #name {
-                        fn from(_: &pod2::middleware::TypedValue) -> Self {
-                            Self
-                        }
-                    }
+                    Self
                 }
             }
             syn::Fields::Unnamed(fields) => match fields.unnamed.len() {
                 0 => quote! {
-                    #[automatically_derived]
-                    impl From<&pod2::middleware::TypedValue> for #name {
-                        type Error = pod2::middleware::Error;
-                        fn from(_: &pod2::middleware::TypedValue) -> Self {
-                            Self()
-                        }
-                    }
+                    Self()
                 },
                 1 => quote! {
-                    #[automatically_derived]
-                    impl From<&pod2::middleware::TypedValue> for #name {
-                        type Error = pod2::middleware::Error;
-                        fn from(v: &pod2::middleware::TypedValue) -> Self {
-                            Self(v.into())
-                        }
-                    }
+                    Self(__v.into())
                 },
                 _ => {
                     return syn::Error::new(
@@ -53,13 +36,20 @@ pub fn from_value_derive(input: TokenStream) -> TokenStream {
                     .into();
                 }
             },
-            syn::Fields::Named(_) => {
-                return syn::Error::new(
-                    ast.span(),
-                    "Cannot derive FromValue for a struct with named fields",
-                )
-                .to_compile_error()
-                .into();
+            syn::Fields::Named(fields) => {
+                if fields.named.is_empty() {
+                    quote! {
+                        Self {}
+                    }
+                }
+                else {
+                    return syn::Error::new(
+                        ast.span(),
+                        "Cannot derive FromValue for a struct with named fields",
+                    )
+                    .to_compile_error()
+                    .into();
+                }
             }
         },
         syn::Data::Enum(_) => {
@@ -69,33 +59,35 @@ pub fn from_value_derive(input: TokenStream) -> TokenStream {
         }
         syn::Data::Union(_) => return unions_not_supported(ast.span()),
     };
-    let forward = quote! {
+    quote! {
+        #[automatically_derived]
+        impl From<&pod2::middleware::TypedValue> for #name {
+            fn from(__v: &pod2::middleware::TypedValue) -> Self {
+                #generated
+            }
+        }
+        
         #[automatically_derived]
         impl From<pod2::middleware::TypedValue> for #name {
-            fn from(v: pod2::middleware::TypedValue) -> Result<Self, Self::Error> {
-                Self::from(&v)
+            fn from(__v: pod2::middleware::TypedValue) -> Self {
+                Self::from(&__v)
             }
         }
 
         #[automatically_derived]
         impl From<&pod2::middleware::Value> for #name {
-            fn from(v: &pod2::middleware::Value) -> Result<Self, Self::Error> {
-                Self::from(v.typed())
+            fn from(__v: &pod2::middleware::Value) -> Self {
+                Self::from(__v.typed())
             }
         }
 
         #[automatically_derived]
         impl From<pod2::middleware::Value> for #name {
-            fn from(v: pod2::middleware::Value) -> Result<Self, Self::Error> {
-                Self::from(v.typed())
+            fn from(__v: pod2::middleware::Value) -> Self {
+                Self::from(__v.typed())
             }
         }
-    };
-    quote! {
-        #generated
-        #forward
-    }
-    .into()
+    }.into()
 }
 
 #[proc_macro_derive(TryFromValue)]
