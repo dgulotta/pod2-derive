@@ -12,7 +12,6 @@ mod test {
     }
 
     #[derive(TryFromValue)]
-    #[allow(dead_code)]
     struct MyUnitStruct;
 
     #[derive(TryFromValue)]
